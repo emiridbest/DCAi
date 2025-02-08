@@ -66,7 +66,7 @@ import {
     try {
       // Initialize LLM
       const llm = new ChatOpenAI({
-        model: "gpt-4o-mini",
+        model: "gpt-4o-mini",//"gpt-4o-mini",
       });
   
       let walletDataStr: string | null = null;
