@@ -11,11 +11,9 @@
     "build": "next build",
     "start": "next start",
     "lint": "next lint",
-    "install": "npm install --legacy-peer-deps",
     "format": "prettier -c .prettierrc --write \"**/*.{ts,js,cjs,json,md}\"",
     "format:check": "prettier -c .prettierrc --check \"**/*.{ts,js,cjs,json,md}\"",
-    "lint:fix": "turbo run lint:fix",
-    "test:types": "turbo run test:types"
+    "test": "jest"
   },
   "dependencies": {
     "@coinbase/agentkit": "^0.1.0",
@@ -71,7 +69,6 @@
     "tailwindcss": "^3.4.14",
     "ts-jest": "^29.2.5",
     "ts-node": "^10.9.2",
-    "turbo": "^1.12.4",
     "typedoc": "^0.27.2",
     "typescript": "^5.6.3"
   },
