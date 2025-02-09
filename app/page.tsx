@@ -32,7 +32,7 @@ const Home = () => {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#00120f] text-white overflow-hidden">
+    <div className="w-full min-h-screen bg-[#00120f] text-white overflow-hidden">
       {/* Grid Background */}
       <GridBackground />
 
