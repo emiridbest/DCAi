@@ -54,8 +54,7 @@ function validateEnvironment(): void {
 validateEnvironment();
 
 // Configure a file to persist the agent's CDP MPC Wallet Data
-const WALLET_DATA_FILE = "NEXT_PUBLIC_CDP_WALLET_DATA";
-
+const WALLET_DATA_FILE = "public/wallet_data.txt";
 /**
 * Initialize the agent with CDP Agentkit
 *
