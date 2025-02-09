@@ -16,8 +16,34 @@ import { createReactAgent } from "@langchain/langgraph/prebuilt";
 import { ChatOpenAI } from "@langchain/openai";
 import * as fs from "fs";
 import * as readline from "readline";
+import { MongoClient } from 'mongodb'
 
-const OPENAI_API_KEY=process.env.NEXT_PUBLIC_OPENAI_API_KEY
+const connectToDatabase = async () => {
+  if (!process.env.NEXT_PUBLIC_MONGODB_URI) {
+    throw new Error("MongoDB URI is not defined");
+  }
+  const client = new MongoClient(process.env.NEXT_PUBLIC_MONGODB_URI);
+  await client.connect();
+  return client;
+};
+const getWalletDataFromMongoDB = async () => {
+  const client = await connectToDatabase();
+  const database = client.db('kluivert');
+  const collection = database.collection('wallets');
+  const walletData = await collection.findOne();
+  await client.close();
+  return walletData;
+};
+
+// Function to save wallet data to MongoDB
+const saveWalletDataToMongoDB = async (walletData: any) => {
+  const client = await connectToDatabase();
+  const database = client.db('kluivert');
+  const collection = database.collection('wallets');
+  await collection.insertOne(walletData);
+  await client.close();
+};
+const OPENAI_API_KEY = process.env.NEXT_PUBLIC_OPENAI_API_KEY
 /**
 * Validates that required environment variables are set
 *
@@ -30,31 +56,29 @@ function validateEnvironment(): void {
   // Check required variables
   const requiredVars = ["NEXT_PUBLIC_OPENAI_API_KEY", "NEXT_PUBLIC_CDP_API_KEY_NAME", "NEXT_PUBLIC_CDP_API_KEY_PRIVATE_KEY"];
   requiredVars.forEach(varName => {
-      if (!process.env[varName]) {
-          missingVars.push(varName);
-      }
+    if (!process.env[varName]) {
+      missingVars.push(varName);
+    }
   });
 
   // Exit if any required variables are missing
   if (missingVars.length > 0) {
-      console.error("Error: Required environment variables are not set");
-      missingVars.forEach(varName => {
-          console.error(`${varName}=your_${varName.toLowerCase()}_here`);
-      });
-      process.exit(1);
+    console.error("Error: Required environment variables are not set");
+    missingVars.forEach(varName => {
+      console.error(`${varName}=your_${varName.toLowerCase()}_here`);
+    });
+    process.exit(1);
   }
 
   // Warn about optional NETWORK_ID
   if (!process.env.NEXT_PUBLIC_NETWORK_ID) {
-      console.warn("Warning: NETWORK_ID not set, defaulting to base-sepolia testnet");
+    console.warn("Warning: NETWORK_ID not set, defaulting to base-sepolia testnet");
   }
 }
 
 // Add this right after imports and before any other code
 validateEnvironment();
 
-// Configure a file to persist the agent's CDP MPC Wallet Data
-const WALLET_DATA_FILE = "public/wallet_data.txt";
 /**
 * Initialize the agent with CDP Agentkit
 *
@@ -63,66 +87,65 @@ const WALLET_DATA_FILE = "public/wallet_data.txt";
 export async function initializeAgent() {
   try {
 
-      // Initialize LLM
- const llm = new ChatOpenAI({
+    // Initialize LLM
+    const llm = new ChatOpenAI({
       apiKey: OPENAI_API_KEY,
       model: "gpt-4o-mini",
       temperature: 0.7,
       maxTokens: 2048
-  });
+    });
 
-      // Read existing wallet data if available
-      let walletDataStr = process.env.NEXT_PUBLIC_CDP_WALLET_DATA;
-      try {
-          if (fs.existsSync(WALLET_DATA_FILE)) {
-              walletDataStr = fs.readFileSync(WALLET_DATA_FILE, 'utf8');
-          }
-      } catch (error) {
-          console.warn('Could not read wallet data file:', error);
-      }
+    // Read existing wallet data if available
+    let walletDataStr;
+    try {
+      const walletData = await getWalletDataFromMongoDB();
+      walletDataStr = walletData ? JSON.stringify(walletData) : undefined;
+    } catch (error) {
+      console.warn('Could not read wallet data:', error);
+    }
 
-      // Configure CDP Wallet Provider
-      const config = {
+    // Configure CDP Wallet Provider
+    const config = {
+      apiKeyName: process.env.NEXT_PUBLIC_CDP_API_KEY_NAME,
+      apiKeyPrivateKey: process.env.NEXT_PUBLIC_CDP_API_KEY_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+      cdpWalletData: walletDataStr || undefined,
+      networkId: process.env.NEXT_PUBLIC_NETWORK_ID || "base-sepolia",
+    };
+
+    const walletProvider = await CdpWalletProvider.configureWithWallet(config);
+
+    // Initialize AgentKit
+    const agentkit = await AgentKit.from({
+      walletProvider,
+      actionProviders: [
+        wethActionProvider(),
+        pythActionProvider(),
+        walletActionProvider(),
+        erc20ActionProvider(),
+        cdpApiActionProvider({
           apiKeyName: process.env.NEXT_PUBLIC_CDP_API_KEY_NAME,
           apiKeyPrivateKey: process.env.NEXT_PUBLIC_CDP_API_KEY_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-          cdpWalletData: walletDataStr || undefined,
-          networkId: process.env.NEXT_PUBLIC_NETWORK_ID || "base-sepolia",
-      };
-
-      const walletProvider = await CdpWalletProvider.configureWithWallet(config);
-
-      // Initialize AgentKit
-      const agentkit = await AgentKit.from({
-          walletProvider,
-          actionProviders: [
-              wethActionProvider(),
-              pythActionProvider(),
-              walletActionProvider(),
-              erc20ActionProvider(),
-              cdpApiActionProvider({
-                  apiKeyName: process.env.NEXT_PUBLIC_CDP_API_KEY_NAME,
-                  apiKeyPrivateKey: process.env.NEXT_PUBLIC_CDP_API_KEY_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-              }),
-              cdpWalletActionProvider({
-                  apiKeyName: process.env.NEXT_PUBLIC_CDP_API_KEY_NAME,
-                  apiKeyPrivateKey: process.env.NEXT_PUBLIC_CDP_API_KEY_PRIVATE_KEY?.replace(/\\n/g, "\n"),
-              }),
-          ],
-      });
+        }),
+        cdpWalletActionProvider({
+          apiKeyName: process.env.NEXT_PUBLIC_CDP_API_KEY_NAME,
+          apiKeyPrivateKey: process.env.NEXT_PUBLIC_CDP_API_KEY_PRIVATE_KEY?.replace(/\\n/g, "\n"),
+        }),
+      ],
+    });
 
 
-      const tools = await getLangChainTools(agentkit);
-  
-      // Store buffered conversation history in memory
-      const memory = new MemorySaver();
-      const agentConfig = { configurable: { thread_id: "CDP AgentKit Chatbot Example!" } };
+    const tools = await getLangChainTools(agentkit);
 
-      // Create React Agent using the LLM and CDP AgentKit tools
-      const agent = createReactAgent({
-          llm,
-          tools,
-          checkpointSaver: memory,
-          messageModifier: `
+    // Store buffered conversation history in memory
+    const memory = new MemorySaver();
+    const agentConfig = { configurable: { thread_id: "CDP AgentKit Chatbot Example!" } };
+
+    // Create React Agent using the LLM and CDP AgentKit tools
+    const agent = createReactAgent({
+      llm,
+      tools,
+      checkpointSaver: memory,
+      messageModifier: `
         You are a helpful agent that can interact onchain using the Coinbase Developer Platform AgentKit. You are 
         empowered to interact onchain using your tools. If you ever need funds, you can request them from the 
         faucet if you are on network ID 'base-sepolia'. If not, you can provide your wallet details and request 
@@ -144,16 +167,16 @@ export async function initializeAgent() {
         6. Keep detailed records of all transactions for each donor
         Make sure to inform users about gas fees and recommend appropriate DCA intervals to minimize costs.
         `,
-      });
+    });
 
-      // Save wallet data
-      const exportedWallet = await walletProvider.exportWallet();
-      fs.writeFileSync(WALLET_DATA_FILE, JSON.stringify(exportedWallet));
+    // Save wallet data
+    const exportedWallet = await walletProvider.exportWallet();
+    await saveWalletDataToMongoDB(exportedWallet);
 
-      return { agent, config: agentConfig };
+    return { agent, config: agentConfig };
   } catch (error) {
-      console.error("Failed to initialize agent:", error);
-      throw error; // Re-throw to be handled by caller
+    console.error("Failed to initialize agent:", error);
+    throw error; // Re-throw to be handled by caller
   }
 }
 
@@ -170,29 +193,29 @@ async function runAutonomousMode(agent: any, config: any, interval = 10) {
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
-      try {
-          const thought =
-              "Be creative and do something interesting on the blockchain. " +
-              "Choose an action or set of actions and execute it that highlights your abilities.";
+    try {
+      const thought =
+        "Be creative and do something interesting on the blockchain. " +
+        "Choose an action or set of actions and execute it that highlights your abilities.";
 
-          const stream = await agent.stream({ messages: [new HumanMessage(thought)] }, config);
+      const stream = await agent.stream({ messages: [new HumanMessage(thought)] }, config);
 
-          for await (const chunk of stream) {
-              if ("agent" in chunk) {
-                  console.log(chunk.agent.messages[0].content);
-              } else if ("tools" in chunk) {
-                  console.log(chunk.tools.messages[0].content);
-              }
-              console.log("-------------------");
-          }
-
-          await new Promise(resolve => setTimeout(resolve, interval * 1000));
-      } catch (error) {
-          if (error instanceof Error) {
-              console.error("Error:", error.message);
-          }
-          process.exit(1);
+      for await (const chunk of stream) {
+        if ("agent" in chunk) {
+          console.log(chunk.agent.messages[0].content);
+        } else if ("tools" in chunk) {
+          console.log(chunk.tools.messages[0].content);
+        }
+        console.log("-------------------");
       }
+
+      await new Promise(resolve => setTimeout(resolve, interval * 1000));
+    } catch (error) {
+      if (error instanceof Error) {
+        console.error("Error:", error.message);
+      }
+      process.exit(1);
+    }
   }
 }
 
@@ -207,40 +230,40 @@ async function runChatMode(agent: any, config: any) {
   console.log("Starting chat mode... Type 'exit' to end.");
 
   const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
+    input: process.stdin,
+    output: process.stdout,
   });
 
   const question = (prompt: string): Promise<string> =>
-      new Promise(resolve => rl.question(prompt, resolve));
+    new Promise(resolve => rl.question(prompt, resolve));
 
   try {
-      // eslint-disable-next-line no-constant-condition
-      while (true) {
-          const userInput = await question("\nPrompt: ");
+    // eslint-disable-next-line no-constant-condition
+    while (true) {
+      const userInput = await question("\nPrompt: ");
 
-          if (userInput.toLowerCase() === "exit") {
-              break;
-          }
-
-          const stream = await agent.stream({ messages: [new HumanMessage(userInput)] }, config);
-
-          for await (const chunk of stream) {
-              if ("agent" in chunk) {
-                  console.log(chunk.agent.messages[0].content);
-              } else if ("tools" in chunk) {
-                  console.log(chunk.tools.messages[0].content);
-              }
-              console.log("-------------------");
-          }
+      if (userInput.toLowerCase() === "exit") {
+        break;
       }
+
+      const stream = await agent.stream({ messages: [new HumanMessage(userInput)] }, config);
+
+      for await (const chunk of stream) {
+        if ("agent" in chunk) {
+          console.log(chunk.agent.messages[0].content);
+        } else if ("tools" in chunk) {
+          console.log(chunk.tools.messages[0].content);
+        }
+        console.log("-------------------");
+      }
+    }
   } catch (error) {
-      if (error instanceof Error) {
-          console.error("Error:", error.message);
-      }
-      process.exit(1);
+    if (error instanceof Error) {
+      console.error("Error:", error.message);
+    }
+    process.exit(1);
   } finally {
-      rl.close();
+    rl.close();
   }
 }
 
@@ -252,58 +275,58 @@ async function runChatMode(agent: any, config: any) {
 async function chooseMode(): Promise<"chat" | "auto"> {
   //
   const rl = readline.createInterface({
-      input: process.stdin,
-      output: process.stdout,
+    input: process.stdin,
+    output: process.stdout,
   });
 
   const question = (prompt: string): Promise<string> =>
-      new Promise(resolve => rl.question(prompt, resolve));
+    new Promise(resolve => rl.question(prompt, resolve));
 
   // eslint-disable-next-line no-constant-condition
   while (true) {
-      console.log("\nAvailable modes:");
-      console.log("1. chat    - Interactive chat mode");
-      console.log("2. auto    - Autonomous action mode");
+    console.log("\nAvailable modes:");
+    console.log("1. chat    - Interactive chat mode");
+    console.log("2. auto    - Autonomous action mode");
 
-      const choice = (await question("\nChoose a mode (enter number or name): "))
-          .toLowerCase()
-          .trim();
+    const choice = (await question("\nChoose a mode (enter number or name): "))
+      .toLowerCase()
+      .trim();
 
-      if (choice === "1" || choice === "chat") {
-          rl.close();
-          return "chat";
-      } else if (choice === "2" || choice === "auto") {
-          rl.close();
-          return "auto";
-      }
-      console.log("Invalid choice. Please try again.");
+    if (choice === "1" || choice === "chat") {
+      rl.close();
+      return "chat";
+    } else if (choice === "2" || choice === "auto") {
+      rl.close();
+      return "auto";
+    }
+    console.log("Invalid choice. Please try again.");
   }
 }
 
 async function main() {
   try {
-      const { agent, config } = await initializeAgent();
+    const { agent, config } = await initializeAgent();
 
-      const mode = await chooseMode();
+    const mode = await chooseMode();
 
 
-      if (mode === "chat") {
-          await runChatMode(agent, config);
-      } else {
-          await runAutonomousMode(agent, config);
-      }
+    if (mode === "chat") {
+      await runChatMode(agent, config);
+    } else {
+      await runAutonomousMode(agent, config);
+    }
   } catch (error) {
-      if (error instanceof Error) {
-          console.error("Error:", error.message);
-      }
-      process.exit(1);
+    if (error instanceof Error) {
+      console.error("Error:", error.message);
+    }
+    process.exit(1);
   }
 }
 
 if (require.main === module) {
   console.log("Starting Agent...");
   main().catch(error => {
-      console.error("Fatal error:", error);
-      process.exit(1);
+    console.error("Fatal error:", error);
+    process.exit(1);
   });
 }

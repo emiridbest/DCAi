@@ -37,6 +37,7 @@
     "ethers": "^6.13.4",
     "langchain-xai": "^0.2.2",
     "lucide-react": "^0.475.0",
+    "mongodb": "^6.13.0",
     "next": "^15.0.1",
     "next-iron-session": "^4.2.0",
     "pino-pretty": "^11.3.0",
