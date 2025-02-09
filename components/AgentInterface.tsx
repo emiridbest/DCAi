@@ -97,44 +97,7 @@ const AgentInterface = () => {
     }
   };
 
-  const handleSendMessage = async (prompt?: string) => {
-    const message = prompt || input;
-    if (!message.trim()) return;
 
-    setIsLoading(true);
-    setMessages(prev => [...prev, { type: 'user', content: message }]);
-
-    try {
-      const response = await fetch('/api/agent-chat', {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({ message }),
-      });
-
-      if (!response.ok) {
-        throw new Error('Failed to send message');
-      }
-
-      const data = await response.json();
-
-      const newMessageIndex = messages.length;
-      setMessages(prev => [...prev, {
-        type: 'agent',
-        content: data.response
-      }]);
-      generateAudio(data.response, newMessageIndex); // Convert response to audio
-    } catch (error) {
-      setMessages(prev => [...prev, {
-        type: 'error',
-        content: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
-      }]);
-    } finally {
-      setIsLoading(false);
-      setInput('');
-    }
-  };
 
   const stopRecording = () => {
     if (mediaRecorderRef.current && isRecording) {
@@ -242,7 +205,48 @@ const AgentInterface = () => {
       setInput('');
     }
   };
+  const handleSendMessage = async (prompt?: string) => {
+    if (mode === 'learn') {
+      await handleLearnMessage();
+    } else {
+    const message = prompt || input;
+    if (!message.trim()) return;
 
+    setIsLoading(true);
+    setMessages(prev => [...prev, { type: 'user', content: message }]);
+
+    try {
+      const response = await fetch('/api/agent-chat', {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ message }),
+      });
+
+      if (!response.ok) {
+        throw new Error('Failed to send message');
+      }
+
+      const data = await response.json();
+
+      const newMessageIndex = messages.length;
+      setMessages(prev => [...prev, {
+        type: 'agent',
+        content: data.response
+      }]);
+      generateAudio(data.response, newMessageIndex); // Convert response to audio
+    } catch (error) {
+      setMessages(prev => [...prev, {
+        type: 'error',
+        content: `Error: ${error instanceof Error ? error.message : 'Unknown error'}`
+      }]);
+    } finally {
+      setIsLoading(false);
+      setInput('');
+    }
+  }
+};
 
   const handleModeSelect = async (selectedMode: 'chat' | 'auto' | 'learn') => {
     setMode(selectedMode);
