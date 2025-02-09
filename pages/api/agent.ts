@@ -54,7 +54,7 @@ function validateEnvironment(): void {
 validateEnvironment();
 
 // Configure a file to persist the agent's CDP MPC Wallet Data
-const WALLET_DATA_FILE = "wallet_data.txt";
+const WALLET_DATA_FILE = "NEXT_PUBLIC_CDP_WALLET_DATA";
 
 /**
 * Initialize the agent with CDP Agentkit
@@ -73,7 +73,7 @@ export async function initializeAgent() {
   });
 
       // Read existing wallet data if available
-      let walletDataStr;
+      let walletDataStr = process.env.NEXT_PUBLIC_CDP_WALLET_DATA;
       try {
           if (fs.existsSync(WALLET_DATA_FILE)) {
               walletDataStr = fs.readFileSync(WALLET_DATA_FILE, 'utf8');
